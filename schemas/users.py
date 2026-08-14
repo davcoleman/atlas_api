@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr, field_validator
-from typing import Optional
+from typing import List, Optional
 from datetime import datetime
 from models.users import UserType, UserRole
 
@@ -41,7 +41,15 @@ class UserOut(BaseModel):
     kyc_status: Optional[str] = None
     kyc_session_id: Optional[str] = None
     kyc_verified_at: Optional[datetime] = None
+    permissions: List[str] = []
     created_at: datetime
+
+    @field_validator("permissions", mode="before")
+    @classmethod
+    def _split_permissions(cls, v):
+        if isinstance(v, str):
+            return [p for p in v.split(",") if p]
+        return v or []
 
     model_config = {"from_attributes": True}
 
@@ -134,3 +142,42 @@ class OTPResendRequest(BaseModel):
 
 class AcceptTermsRequest(BaseModel):
     signature: str
+
+
+STAFF_ROLES = (UserRole.staff, UserRole.finance_admin, UserRole.crm_agent)
+
+
+class StaffCreate(BaseModel):
+    full_name: str
+    email: EmailStr
+    password: str
+    role: UserRole = UserRole.staff
+    permissions: List[str] = []
+
+    @field_validator("password")
+    @classmethod
+    def password_strength(cls, v: str) -> str:
+        if len(v) < 6:
+            raise ValueError("Password must be at least 6 characters")
+        return v
+
+    @field_validator("role")
+    @classmethod
+    def role_must_be_staff_tier(cls, v: UserRole) -> UserRole:
+        if v not in STAFF_ROLES:
+            raise ValueError("Role must be one of: staff, finance_admin, crm_agent")
+        return v
+
+
+class StaffUpdate(BaseModel):
+    full_name: Optional[str] = None
+    role: Optional[UserRole] = None
+    permissions: Optional[List[str]] = None
+    is_active: Optional[bool] = None
+
+    @field_validator("role")
+    @classmethod
+    def role_must_be_staff_tier(cls, v: Optional[UserRole]) -> Optional[UserRole]:
+        if v is not None and v not in STAFF_ROLES:
+            raise ValueError("Role must be one of: staff, finance_admin, crm_agent")
+        return v

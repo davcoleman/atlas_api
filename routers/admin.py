@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 
 from database import get_db
-from dependencies import require_super_admin, require_staff_or_admin
+from dependencies import require_super_admin, require_staff_or_admin, require_permission
 from models.users import User, UserRole, UserType, BusinessProfile
 from models.shipments import Shipment, ShipmentStatus, ShipmentStatusHistory
 from models.wallet import Wallet, WalletTransaction, TransactionStatus, TransactionType
@@ -14,10 +14,14 @@ from models.buyforme import BuyForMeRequest, BuyForMeStatus
 from models.notifications import Notification
 from schemas.shipments import ShipmentOut, AdminShipmentOut, AdminShipmentCreate
 from schemas.wallet import WalletTransactionOut
-from schemas.users import UserOut
+from schemas.users import UserOut, StaffCreate, StaffUpdate
 from schemas.buyforme import AdminBuyForMeOut
+from services.permissions import PERMISSION_CATALOG, parse_permissions, serialize_permissions
+from services.auth_service import hash_password
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
+
+WALLET_LEGACY_ROLES = (UserRole.finance_admin,)
 
 
 # ── Overview ───────────────────────────────────────────────────────────────────
@@ -68,9 +72,9 @@ def list_business_users(
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_staff_or_admin),
+    current_user: User = Depends(require_permission("customers")),
 ):
-    from models.users import BusinessProfile, UserType
+    from models.users import BusinessProfile, UserType  # noqa: F811
     q = db.query(User, BusinessProfile).join(
         BusinessProfile, User.id == BusinessProfile.user_id
     ).filter(User.user_type == UserType.business)
@@ -96,7 +100,7 @@ def list_customers(
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_staff_or_admin),
+    current_user: User = Depends(require_permission("customers")),
 ):
     q = db.query(User).filter(User.role == UserRole.customer)
     if user_type:
@@ -135,7 +139,7 @@ def list_customers(
 @router.get("/customers/stats")
 def customers_stats(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_staff_or_admin),
+    current_user: User = Depends(require_permission("customers")),
 ):
     now = datetime.utcnow()
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -172,7 +176,7 @@ def all_shipments(
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_staff_or_admin),
+    current_user: User = Depends(require_permission("shipments")),
 ):
     q = db.query(Shipment, User).join(User, User.id == Shipment.user_id)
     if status:
@@ -203,7 +207,7 @@ def all_shipments(
 @router.get("/shipments/stats")
 def shipments_stats(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_staff_or_admin),
+    current_user: User = Depends(require_permission("shipments")),
 ):
     def _count(status):
         return db.query(func.count(Shipment.id)).filter(Shipment.status == status).scalar() or 0
@@ -222,7 +226,7 @@ def shipments_stats(
 def admin_create_shipment(
     body: AdminShipmentCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_staff_or_admin),
+    current_user: User = Depends(require_permission("shipments")),
 ):
     customer = db.query(User).filter(
         User.id == body.customer_id, User.role == UserRole.customer
@@ -230,8 +234,17 @@ def admin_create_shipment(
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
 
-    from routers.shipments import _gen_tracking
+    from routers.shipments import _gen_tracking, apply_default_coords, price_shipment
     from services.notification_service import notify_shipment_booked
+
+    total_amount = body.total_amount or 0.0
+    engine_code = base_shipping = vat_amount = handling_fee = insurance_premium = None
+    if total_amount <= 0:
+        # Admin left the amount blank — price it live instead of booking at $0.
+        engine_code, result = price_shipment(db, body)
+        total_amount = result.subtotal
+        base_shipping, vat_amount = result.base_shipping, result.vat_amount
+        handling_fee, insurance_premium = result.handling_fee, result.insurance_premium
 
     shipment = Shipment(
         tracking_number=_gen_tracking(),
@@ -250,11 +263,17 @@ def admin_create_shipment(
         origin_address=body.origin_address,
         destination_address=body.destination_address,
         insurance_tier=body.insurance_tier,
-        total_amount=body.total_amount or 0.0,
+        engine_code=engine_code,
+        base_shipping=base_shipping or 0.0,
+        vat_amount=vat_amount or 0.0,
+        handling_fee=handling_fee or 0.0,
+        insurance_premium=insurance_premium or 0.0,
+        total_amount=total_amount,
         notes=body.notes,
         assigned_staff_id=current_user.id,
         estimated_arrival=datetime.utcnow() + timedelta(days=14 if body.shipping_mode.value == "sea" else 7),
     )
+    apply_default_coords(shipment)
     db.add(shipment)
     db.flush()
 
@@ -286,7 +305,7 @@ def admin_full_ledger(
     skip: int = 0,
     limit: int = 200,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_staff_or_admin),
+    current_user: User = Depends(require_permission("wallet", legacy_full_access_roles=WALLET_LEGACY_ROLES)),
 ):
     q = db.query(WalletTransaction)
     if user_id:
@@ -307,7 +326,7 @@ def all_tickets(
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_staff_or_admin),
+    current_user: User = Depends(require_permission("tickets")),
 ):
     q = db.query(SupportTicket)
     if status:
@@ -322,7 +341,7 @@ def assign_ticket(
     ticket_id: int,
     agent_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_staff_or_admin),
+    current_user: User = Depends(require_permission("tickets")),
 ):
     ticket = db.query(SupportTicket).filter(SupportTicket.id == ticket_id).first()
     if not ticket:
@@ -342,7 +361,7 @@ def all_buyforme(
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_staff_or_admin),
+    current_user: User = Depends(require_permission("buyforme")),
 ):
     q = db.query(BuyForMeRequest, User).join(User, User.id == BuyForMeRequest.customer_id)
     if status:
@@ -372,7 +391,7 @@ def all_buyforme(
 @router.get("/reports/shipment-volume")
 def shipment_volume_report(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_staff_or_admin),
+    current_user: User = Depends(require_permission("analytics")),
 ):
     from services.analytics_service import get_revenue_trend, get_top_routes
     return {
@@ -384,7 +403,7 @@ def shipment_volume_report(
 @router.get("/reports/wallet-summary")
 def wallet_summary_report(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_staff_or_admin),
+    current_user: User = Depends(require_permission("wallet", legacy_full_access_roles=WALLET_LEGACY_ROLES)),
 ):
     from sqlalchemy import func
     from models.wallet import Wallet
@@ -401,3 +420,95 @@ def wallet_summary_report(
         "pending_deposits": round(pending_deposits, 2),
         "total_processed_volume": round(total_processed, 2),
     }
+
+
+# ── Staff ─────────────────────────────────────────────────────────────────────
+# Only a super_admin can create/edit staff or grant privileges — letting a staff
+# account manage other staff would let it escalate its own access.
+
+@router.get("/staff/permissions")
+def list_permission_catalog(current_user: User = Depends(require_super_admin)):
+    return [{"key": k, "label": v} for k, v in PERMISSION_CATALOG.items()]
+
+
+@router.get("/staff", response_model=List[UserOut])
+def list_staff(
+    role: Optional[str] = None,
+    is_active: Optional[bool] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_super_admin),
+):
+    q = db.query(User).filter(User.role != UserRole.customer)
+    if role:
+        q = q.filter(User.role == role)
+    if is_active is not None:
+        q = q.filter(User.is_active == is_active)
+    return q.order_by(User.created_at.desc()).all()
+
+
+@router.post("/staff", response_model=UserOut, status_code=201)
+def create_staff(
+    body: StaffCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_super_admin),
+):
+    if db.query(User).filter(User.email == body.email).first():
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    staff = User(
+        full_name=body.full_name,
+        email=body.email,
+        password_hash=hash_password(body.password),
+        role=body.role,
+        is_active=True,
+        is_verified=True,
+        permissions=serialize_permissions(body.permissions),
+    )
+    db.add(staff)
+    db.commit()
+    db.refresh(staff)
+    return staff
+
+
+@router.patch("/staff/{user_id}", response_model=UserOut)
+def update_staff(
+    user_id: int,
+    body: StaffUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_super_admin),
+):
+    staff = db.query(User).filter(User.id == user_id, User.role != UserRole.customer).first()
+    if not staff:
+        raise HTTPException(status_code=404, detail="Staff account not found")
+    if staff.role == UserRole.super_admin:
+        raise HTTPException(status_code=403, detail="Cannot modify a super admin account")
+
+    if body.full_name is not None:
+        staff.full_name = body.full_name
+    if body.role is not None:
+        staff.role = body.role
+    if body.permissions is not None:
+        staff.permissions = serialize_permissions(body.permissions)
+    if body.is_active is not None:
+        staff.is_active = body.is_active
+
+    db.commit()
+    db.refresh(staff)
+    return staff
+
+
+@router.delete("/staff/{user_id}", status_code=204)
+def deactivate_staff(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_super_admin),
+):
+    staff = db.query(User).filter(User.id == user_id, User.role != UserRole.customer).first()
+    if not staff:
+        raise HTTPException(status_code=404, detail="Staff account not found")
+    if staff.role == UserRole.super_admin:
+        raise HTTPException(status_code=403, detail="Cannot deactivate a super admin account")
+
+    staff.is_active = False
+    staff.permissions = ""
+    db.commit()

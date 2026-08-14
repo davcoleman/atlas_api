@@ -5,7 +5,7 @@ from typing import List, Optional
 
 from database import get_db
 from schemas.crm import LeadCreate, LeadUpdate, LeadOut, CommunicationLogCreate, CommunicationLogOut
-from dependencies import get_current_user, require_staff_or_admin
+from dependencies import get_current_user, require_permission
 from models.users import User
 from models.crm import Lead, CommunicationLog, LeadStage
 
@@ -18,7 +18,7 @@ router = APIRouter(prefix="/crm", tags=["CRM"])
 def create_lead(
     body: LeadCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_staff_or_admin),
+    current_user: User = Depends(require_permission("crm")),
 ):
     lead = Lead(**body.model_dump(exclude_none=True))
     db.add(lead)
@@ -34,7 +34,7 @@ def list_leads(
     skip: int = 0,
     limit: int = 50,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_staff_or_admin),
+    current_user: User = Depends(require_permission("crm")),
 ):
     q = db.query(Lead)
     if stage:
@@ -48,7 +48,7 @@ def list_leads(
 def get_lead(
     lead_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_staff_or_admin),
+    current_user: User = Depends(require_permission("crm")),
 ):
     lead = db.query(Lead).filter(Lead.id == lead_id).first()
     if not lead:
@@ -61,7 +61,7 @@ def update_lead(
     lead_id: int,
     body: LeadUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_staff_or_admin),
+    current_user: User = Depends(require_permission("crm")),
 ):
     lead = db.query(Lead).filter(Lead.id == lead_id).first()
     if not lead:
@@ -80,7 +80,7 @@ def update_lead(
 def delete_lead(
     lead_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_staff_or_admin),
+    current_user: User = Depends(require_permission("crm")),
 ):
     lead = db.query(Lead).filter(Lead.id == lead_id).first()
     if not lead:
@@ -95,7 +95,7 @@ def delete_lead(
 def log_communication(
     body: CommunicationLogCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_staff_or_admin),
+    current_user: User = Depends(require_permission("crm")),
 ):
     log = CommunicationLog(**body.model_dump(exclude_none=True), created_by=current_user.id)
     db.add(log)
@@ -116,7 +116,7 @@ def list_communications(
     skip: int = 0,
     limit: int = 50,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_staff_or_admin),
+    current_user: User = Depends(require_permission("crm")),
 ):
     q = db.query(CommunicationLog)
     if user_id:

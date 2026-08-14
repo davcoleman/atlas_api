@@ -9,7 +9,7 @@ from schemas.tickets import (
     TicketCreate, TicketUpdate, TicketOut, TicketMessageCreate,
     TicketMessageOut, TicketFeedback, TicketListResponse,
 )
-from dependencies import get_current_user, require_staff_or_admin
+from dependencies import get_current_user, require_permission
 from models.users import User, UserRole
 from models.tickets import SupportTicket, TicketMessage, TicketStatus
 from services.notification_service import notify_ticket_resolved
@@ -135,7 +135,7 @@ def update_ticket(
     ticket_id: int,
     body: TicketUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_staff_or_admin),
+    current_user: User = Depends(require_permission("tickets")),
 ):
     ticket = db.query(SupportTicket).filter(SupportTicket.id == ticket_id).first()
     if not ticket:

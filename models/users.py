@@ -30,6 +30,12 @@ class User(Base):
     user_type = Column(SAEnum(UserType), default=UserType.personal, nullable=False)
     role = Column(SAEnum(UserRole), default=UserRole.customer, nullable=False)
 
+    # Comma-separated privilege keys (see services/permissions.py). NULL means this
+    # account predates the granular system — treated as full staff access for
+    # backward compatibility; only accounts created via the Staff tab get an
+    # explicit (possibly empty) value here.
+    permissions = Column(Text, nullable=True)
+
     is_active = Column(Boolean, default=True)
     is_verified = Column(Boolean, default=False)
     email_verified_at = Column(DateTime, nullable=True)

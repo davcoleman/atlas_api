@@ -9,7 +9,7 @@ from schemas.buyforme import (
     BuyForMeCreate, BuyForMeOut, AdminBuyForMeUpdate, BuyForMeListResponse,
     ScrapeRequest, ScrapedProductOut,
 )
-from dependencies import get_current_user, require_staff_or_admin
+from dependencies import get_current_user, require_permission
 from models.users import User, UserRole
 from models.buyforme import BuyForMeRequest, BuyForMeStatus
 from services.notification_service import notify_buyforme_update
@@ -86,7 +86,7 @@ def admin_update_request(
     request_number: str,
     body: AdminBuyForMeUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_staff_or_admin),
+    current_user: User = Depends(require_permission("buyforme")),
 ):
     req = db.query(BuyForMeRequest).filter(BuyForMeRequest.request_number == request_number).first()
     if not req:

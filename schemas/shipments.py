@@ -49,6 +49,14 @@ class ShipmentOut(BaseModel):
     currency: str
     status: ShipmentStatus
     payment_status: str
+    origin_lat: Optional[float] = None
+    origin_lng: Optional[float] = None
+    destination_lat: Optional[float] = None
+    destination_lng: Optional[float] = None
+    current_lat: Optional[float] = None
+    current_lng: Optional[float] = None
+    current_location_label: Optional[str] = None
+    progress_percent: int = 0
     estimated_arrival: Optional[datetime] = None
     actual_arrival: Optional[datetime] = None
     delivered_at: Optional[datetime] = None
@@ -63,6 +71,14 @@ class ShipmentStatusUpdate(BaseModel):
     status: ShipmentStatus
     note: Optional[str] = None
     estimated_arrival: Optional[datetime] = None
+
+
+class ShipmentLocationUpdate(BaseModel):
+    current_lat: float
+    current_lng: float
+    current_location_label: Optional[str] = None
+    progress_percent: Optional[int] = None
+    note: Optional[str] = None
 
 
 class StatusHistoryOut(BaseModel):

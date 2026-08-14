@@ -4,7 +4,7 @@ from typing import Optional
 
 from database import get_db
 from schemas.analytics import AnalyticsReport, DashboardKPIs
-from dependencies import get_current_user, require_staff_or_admin
+from dependencies import get_current_user, require_permission
 from models.users import User, UserType
 from services.analytics_service import (
     get_dashboard_kpis,
@@ -22,7 +22,7 @@ router = APIRouter(prefix="/analytics", tags=["Analytics"])
 def dashboard(
     months: int = Query(6, ge=1, le=24),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_staff_or_admin),
+    current_user: User = Depends(require_permission("analytics")),
 ):
     return {
         "kpis": get_dashboard_kpis(db),
@@ -37,7 +37,7 @@ def dashboard(
 @router.get("/kpis", response_model=DashboardKPIs)
 def kpis(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_staff_or_admin),
+    current_user: User = Depends(require_permission("analytics")),
 ):
     return get_dashboard_kpis(db)
 
@@ -46,7 +46,7 @@ def kpis(
 def revenue_trend(
     months: int = Query(6, ge=1, le=24),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_staff_or_admin),
+    current_user: User = Depends(require_permission("analytics")),
 ):
     return get_revenue_trend(db, months)
 
@@ -55,7 +55,7 @@ def revenue_trend(
 def top_routes(
     limit: int = Query(10, ge=1, le=50),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_staff_or_admin),
+    current_user: User = Depends(require_permission("analytics")),
 ):
     return get_top_routes(db, limit)
 
@@ -64,7 +64,7 @@ def top_routes(
 def wallet_activity(
     months: int = Query(6, ge=1, le=24),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_staff_or_admin),
+    current_user: User = Depends(require_permission("analytics")),
 ):
     return get_wallet_activity(db, months)
 

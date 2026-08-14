@@ -12,13 +12,15 @@ from schemas.wallet import (
     StripeSessionRequest, StripeSessionOut,
     AdminWalletTransactionOut, AdminWalletStats,
 )
-from dependencies import get_current_user, require_admin
-from models.users import User
+from dependencies import get_current_user, require_permission
+from models.users import User, UserRole
 from models.wallet import Wallet, WalletTransaction, TransactionType, TransactionStatus, PaymentMethod
 from services import wallet_service
 from services.notification_service import notify_payment_completed, notify_deposit_approved
 
 router = APIRouter(prefix="/wallet", tags=["Wallet"])
+
+require_wallet_access = require_permission("wallet", legacy_full_access_roles=(UserRole.finance_admin,))
 
 
 @router.get("/", response_model=WalletSummary)
@@ -71,7 +73,7 @@ def get_transactions(
 @router.get("/admin/pending-deposits", response_model=List[AdminWalletTransactionOut])
 def list_pending_deposits(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_wallet_access),
 ):
     rows = db.query(WalletTransaction, User).join(User, User.id == WalletTransaction.user_id).filter(
         WalletTransaction.transaction_type == TransactionType.deposit,
@@ -91,7 +93,7 @@ def list_pending_deposits(
 def approve_deposit(
     body: AdminDepositApproval,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_wallet_access),
 ):
     if body.action == "approve":
         txn = wallet_service.approve_deposit(db, body.transaction_id, current_user.id)
@@ -107,7 +109,7 @@ def approve_deposit(
 def admin_adjust_balance(
     body: AdminBalanceAdjust,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_wallet_access),
 ):
     if body.transaction_type == TransactionType.refund:
         txn = wallet_service.refund(db, body.user_id, body.amount, body.description, current_user.id)
@@ -130,7 +132,7 @@ def admin_ledger(
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_wallet_access),
 ):
     q = db.query(WalletTransaction, User).join(User, User.id == WalletTransaction.user_id)
 
@@ -162,7 +164,7 @@ def admin_ledger(
 @router.get("/admin/stats", response_model=AdminWalletStats)
 def admin_wallet_stats(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_wallet_access),
 ):
     def _sum(t_type, t_status=TransactionStatus.completed, start=None, end=None):
         q = db.query(func.sum(WalletTransaction.amount)).filter(

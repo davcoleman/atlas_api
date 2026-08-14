@@ -64,6 +64,15 @@ def migrate_db():
         ("users", "kyc_status", "VARCHAR(50)"),
         ("users", "kyc_session_id", "VARCHAR(100)"),
         ("users", "kyc_verified_at", "DATETIME"),
+        ("shipments", "origin_lat", "FLOAT"),
+        ("shipments", "origin_lng", "FLOAT"),
+        ("shipments", "destination_lat", "FLOAT"),
+        ("shipments", "destination_lng", "FLOAT"),
+        ("shipments", "current_lat", "FLOAT"),
+        ("shipments", "current_lng", "FLOAT"),
+        ("shipments", "current_location_label", "VARCHAR(200)"),
+        ("shipments", "progress_percent", "INTEGER DEFAULT 0"),
+        ("users", "permissions", "TEXT"),
     ]
     with engine.connect() as conn:
         for table, col, col_type in new_cols:
@@ -71,4 +80,17 @@ def migrate_db():
             existing = {row[1] for row in result.fetchall()}
             if col not in existing:
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}"))
+        conn.commit()
+
+        # Backfill map pins for shipments created before live tracking existed
+        conn.execute(text("""
+            UPDATE shipments SET origin_lat = 40.6413, origin_lng = -73.7781,
+                current_lat = COALESCE(current_lat, 40.6413), current_lng = COALESCE(current_lng, -73.7781)
+            WHERE origin_lat IS NULL AND (origin_country IS NULL OR lower(origin_country) = 'usa')
+        """))
+        conn.execute(text("""
+            UPDATE shipments SET destination_lat = 5.6052, destination_lng = -0.1719
+            WHERE destination_lat IS NULL AND (destination_country IS NULL OR lower(destination_country) = 'ghana')
+        """))
+        conn.execute(text("UPDATE shipments SET progress_percent = 0 WHERE progress_percent IS NULL"))
         conn.commit()

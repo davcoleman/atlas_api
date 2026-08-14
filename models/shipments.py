@@ -62,6 +62,16 @@ class Shipment(Base):
     status = Column(SAEnum(ShipmentStatus), default=ShipmentStatus.pending)
     payment_status = Column(String(20), default="unpaid")  # unpaid, paid, refunded
 
+    # Live tracking (map + progress bar, admin-updated)
+    origin_lat = Column(Float, nullable=True)
+    origin_lng = Column(Float, nullable=True)
+    destination_lat = Column(Float, nullable=True)
+    destination_lng = Column(Float, nullable=True)
+    current_lat = Column(Float, nullable=True)
+    current_lng = Column(Float, nullable=True)
+    current_location_label = Column(String(200), nullable=True)
+    progress_percent = Column(Integer, default=0)
+
     # Timestamps
     estimated_arrival = Column(DateTime, nullable=True)
     actual_arrival = Column(DateTime, nullable=True)
